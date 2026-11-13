@@ -1,0 +1,5 @@
+wallet,amount,token,memo
+alice.testnet,1.25,,Defaults to NEAR
+bob.testnet,80,USDC,Engineering milestone
+invalid wallet,2.00,USDT,This row demonstrates agent rejection
+carol.testnet,110,USDT,Operations support

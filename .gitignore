@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+dist/
+target/
+contract/target/
+.env
+.env.local
+.veyra-postgres/
+*.wasm
+!.well-known/
+npm-debug.log*
+*.tsbuildinfo
+.DS_Store

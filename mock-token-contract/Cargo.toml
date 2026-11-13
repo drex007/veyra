@@ -1,0 +1,24 @@
+[package]
+name = "veyra-mock-token"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+borsh = "1.5.7"
+near-contract-standards = "=5.17.2"
+near-sdk = { version = "=5.17.2", features = ["legacy"] }
+
+[dev-dependencies]
+near-sdk = { version = "=5.17.2", features = ["legacy", "unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

@@ -1,0 +1,48 @@
+{
+  "name": "veyra",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:setup": "bash scripts/postgres-local.sh setup",
+    "db:start": "bash scripts/postgres-local.sh start",
+    "db:stop": "bash scripts/postgres-local.sh stop",
+    "db:status": "bash scripts/postgres-local.sh status",
+    "contract:build": "cargo near build non-reproducible-wasm --manifest-path contract/Cargo.toml",
+    "contract:test": "cargo test --manifest-path contract/Cargo.toml",
+    "treasury:build": "cargo near build non-reproducible-wasm --manifest-path treasury-contract/Cargo.toml",
+    "treasury:test": "cargo test --manifest-path treasury-contract/Cargo.toml",
+    "mock-token:test": "cargo test --manifest-path mock-token-contract/Cargo.toml",
+    "mock-lending:test": "cargo test --manifest-path mock-lending-contract/Cargo.toml"
+  },
+  "dependencies": {
+    "@near-js/transactions": "latest",
+    "@near-wallet-selector/core": "latest",
+    "@near-wallet-selector/meteor-wallet": "^10.1.4",
+    "@near-wallet-selector/modal-ui": "latest",
+    "@near-wallet-selector/my-near-wallet": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "openai": "^7.56.0",
+    "papaparse": "latest",
+    "postgres": "^4.1.1",
+    "react": "latest",
+    "react-dom": "latest",
+    "read-excel-file": "^9.3.15",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/papaparse": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}
