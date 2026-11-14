@@ -30,6 +30,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { evaluatePayments } from "@/lib/agent";
 import { formatTokenTotals, parseTokenAmount, paymentTotals, sumTokenAmounts } from "@/lib/amounts";
 import { downloadCsv, parsePaymentCsv, paymentsToCsv } from "@/lib/csv";
@@ -463,8 +464,7 @@ export function VeyraApp() {
     <div className="app-shell">
       <aside className={menuOpen ? "sidebar sidebar-open" : "sidebar"}>
         <div className="brand-row">
-          <div className="brand-mark">V</div>
-          <div className="brand-copy"><span>Veyra</span><small>Treasury operations</small></div>
+          <Link className="brand-home" href="/" aria-label="Return to Veyra home"><div className="brand-mark">V</div><div className="brand-copy"><span>Veyra</span><small>Treasury operations</small></div></Link>
           <button className="icon-button mobile-only" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><X size={19} /></button>
         </div>
 

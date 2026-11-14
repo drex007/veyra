@@ -24,7 +24,7 @@ The contract code supports allowlisted NEP-141 tokens, but this deployment curre
 
 ## What judges can verify
 
-1. Open the dashboard and choose **New payment**.
+1. Open the landing page, select **Launch the demo**, and choose **New payment** in the dashboard.
 2. Select **Use demo payroll** or upload a `.csv`/`.xlsx` workbook with `wallet`, `amount`, optional `token`, and `memo` columns. Blank or missing tokens default to NEAR.
 3. Run agent checks. Expand **Agent activity** to inspect the selected tools and the malformed account's enforced hold.
 4. Approve the funding bundle once, then start autonomous settlement without recipient-level wallet prompts.
@@ -115,7 +115,9 @@ owner deposit → independent treasury vault → per-asset reserve policy
                                            liquid vault balance
 ```
 
-- `app/` — Next.js App Router UI and server validation routes
+- `app/page.tsx` — public Veyra landing page and hackathon product narrative
+- `app/dashboard/` — interactive payment and treasury workspace
+- `app/api/` — server validation, persistence, contract, agent and DeFi routes
 - `components/` — wallet provider and responsive Veyra dashboard
 - `lib/agent.ts` — deterministic policy agent and explainable risk decisions
 - `lib/openai-agent.ts` — OpenAI Responses API structured risk analysis
@@ -150,7 +152,7 @@ npm run db:setup
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000` for the public landing page. The working application is available at `http://localhost:3000/dashboard`; every landing-page CTA links there.
 
 `npm run db:setup` creates an isolated development cluster under `.veyra-postgres/`, starts it on `127.0.0.1:5433`, creates the `veyra` database and applies [`db/schema.sql`](db/schema.sql). It uses trust authentication only on the local loopback development server; use managed credentials and TLS in production.
 

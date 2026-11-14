@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "@near-wallet-selector/modal-ui/styles.css";
 import "./globals.css";
-import { WalletProvider } from "@/components/wallet-provider";
 
 export const metadata: Metadata = {
   title: "Veyra — Payments and treasury operations",
@@ -12,7 +11,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <WalletProvider>{children}</WalletProvider>
+        {children}
       </body>
     </html>
   );

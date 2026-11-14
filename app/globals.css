@@ -46,6 +46,7 @@ a { color: inherit; }
   flex-direction: column;
 }
 .brand-row { min-height: 44px; padding: 0 7px 26px; display: flex; align-items: center; gap: 11px; }
+.brand-home { min-width: 0; display: flex; align-items: center; gap: 11px; text-decoration: none; }
 .brand-mark {
   width: 34px;
   height: 34px;
