@@ -37,7 +37,7 @@ import { downloadCsv, parsePaymentCsv, paymentsToCsv } from "@/lib/csv";
 import { parsePaymentExcel } from "@/lib/excel";
 import { TreasuryAutopilot } from "@/components/treasury-autopilot";
 import { clearDemoBatches, getDemoBatches, saveDemoBatch } from "@/lib/storage";
-import type { AgentActivity, CsvPayment, PaymentInvestigation, PaymentToken, TreasuryAgentRun, ValidationPolicy, ValidationSummary, VeyraAssetBatch, VeyraBatch } from "@/lib/types";
+import type { AgentActivity, AgentPaymentDecision, CsvPayment, PaymentInvestigation, PaymentToken, TreasuryAgentRun, ValidationPolicy, ValidationSummary, VeyraAssetBatch, VeyraBatch } from "@/lib/types";
 import { useWallet, type CallMethodInput } from "@/components/wallet-provider";
 
 type View = "overview" | "new" | "treasury" | "history";
@@ -45,7 +45,7 @@ type WizardStep = "upload" | "review" | "execute";
 
 const defaultPolicy: ValidationPolicy = {
   maxPerRecipient: 100,
-  requireExistingAccount: false,
+  requireExistingAccount: true,
   blockDuplicates: true,
   useOpenAI: true,
 };
@@ -697,12 +697,12 @@ function ReviewStep({ validation, processing, onBack, onCreate }: NewPaymentProp
   return (
     <section className="panel review-panel">
       <div className="review-summary">
-        <div><p className="eyebrow">Review complete</p><h2>{validation.accepted} approved. <em>{validation.rejected} need attention.</em></h2><p>Every row was checked against your policy and the NEAR account format.</p></div>
+        <div><p className="eyebrow">Review complete</p><h2>{validation.accepted} ready to fund. <em>{validation.rejected} need attention.</em></h2><p>Only rows that passed the policy, live-account, and agent-readiness checks can enter escrow.</p></div>
         <div className="approved-total"><span>Approved totals</span>{validation.totalsAccepted.map(({ token, amount }) => <strong key={token}>{amount.toFixed(2)} <small>{token}</small></strong>)}</div>
       </div>
       {validation.treasuryAgent && <TreasuryAgentPanel run={validation.treasuryAgent} />}
       {validation.aiAnalysis && <div className={`ai-analysis ${validation.aiAnalysis.riskLevel}`}><span><BrainCircuit size={20} /></span><div><div className="ai-analysis-title"><strong>{validation.aiAnalysis.source === "openai" ? "Veyra Intelligence" : "Policy-engine analysis"}</strong><small>{validation.aiAnalysis.model} · {validation.aiAnalysis.riskLevel} risk</small></div><div className="ai-analysis-counts"><span><b>{validation.aiAnalysis.reviewedRows}</b> reviewed</span><span><b>{validation.aiAnalysis.flaggedRows}</b> flagged</span><span><b>{validation.aiAnalysis.reviewRequired ? "Required" : "Clear"}</b> review</span></div><p>{validation.aiAnalysis.summary}</p>{validation.aiAnalysis.findings.length > 0 && <div className="risk-findings">{validation.aiAnalysis.findings.map((finding) => <article key={finding.code}><div><strong>{finding.title}</strong><span className={`finding-severity ${finding.severity}`}>{finding.severity}</span></div><p>{finding.explanation}</p><small>{finding.evidence}</small><small><b>Action:</b> {finding.suggestedAction}</small></article>)}</div>}{validation.aiAnalysis.recommendations.length > 0 && <ul>{validation.aiAnalysis.recommendations.map((item) => <li key={item}>{item}</li>)}</ul>}</div></div>}
-      <PaymentTable payments={validation.payments} />
+      <PaymentTable payments={validation.payments} decisions={validation.treasuryAgent?.paymentDecisions} />
       <div className="action-row"><button className="button button-ghost" onClick={onBack}>Back to policy</button><div><span className="escrow-note"><LockKeyhole size={15} /> One wallet interaction funds the approved run</span><button className="button button-accent" disabled={processing || !validation.accepted} onClick={onCreate}>{processing ? "Creating…" : "Approve & fund run"}<ArrowRight size={18} /></button></div></div>
     </section>
   );
@@ -733,8 +733,14 @@ function AgentActivityLog({ activity }: { activity: AgentActivity[] }) {
   );
 }
 
-function PaymentTable({ payments }: { payments: CsvPayment[] }) {
-  return <div className="table-wrap"><table><thead><tr><th>Recipient</th><th>Memo</th><th>Amount</th><th>Agent decision</th></tr></thead><tbody>{payments.map((payment) => <tr key={payment.id}><td><strong>{payment.recipient || "Missing wallet"}</strong></td><td>{payment.memo || "—"}</td><td>{payment.amount || "—"} <span className="token-label">{payment.token ?? "NEAR"}</span></td><td>{payment.valid ? <span className="status approved"><CheckCircle2 size={14} /> Approved</span> : <span className="status rejected"><XCircle size={14} /> {payment.issues[0] ?? "Rejected"}</span>}</td></tr>)}</tbody></table></div>;
+function PaymentTable({ payments, decisions = [] }: { payments: CsvPayment[]; decisions?: AgentPaymentDecision[] }) {
+  const decisionsByPayment = new Map(decisions.map((decision) => [decision.paymentId, decision]));
+  return <div className="table-wrap"><table><thead><tr><th>Recipient</th><th>Memo</th><th>Amount</th><th>Agent decision</th></tr></thead><tbody>{payments.map((payment) => {
+    const decision = decisionsByPayment.get(payment.id);
+    const disposition = decision?.disposition ?? (payment.valid ? "ready" : "held");
+    const reason = decision?.reason ?? payment.issues[0] ?? "Deterministic policy hold";
+    return <tr key={payment.id}><td><strong>{payment.recipient || "Missing wallet"}</strong></td><td>{payment.memo || "—"}</td><td>{payment.amount || "—"} <span className="token-label">{payment.token ?? "NEAR"}</span></td><td><div className="decision-cell">{disposition === "ready" ? <span className="status approved"><CheckCircle2 size={14} /> Ready</span> : disposition === "review" ? <span className="status review"><AlertCircle size={14} /> Review required</span> : <span className="status rejected"><XCircle size={14} /> Held</span>}{disposition !== "ready" && <small>{reason}</small>}</div></td></tr>;
+  })}</tbody></table></div>;
 }
 
 function ExecuteStep({

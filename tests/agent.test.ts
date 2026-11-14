@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluatePayments, isValidNearAccountId } from "@/lib/agent";
 import { buildDeterministicFindings } from "@/lib/openai-agent";
-import { runPaymentReadinessAgent } from "@/lib/treasury-agent";
+import { enforceReadinessDecisions, runPaymentReadinessAgent } from "@/lib/treasury-agent";
 import type { CsvPayment } from "@/lib/types";
 
 function payment(recipient: string, amount: string, id = recipient): CsvPayment {
@@ -106,6 +106,23 @@ describe("agent payment policy", () => {
       "get_batch_details",
       "validate_recipients",
       "finalize_readiness",
+    ]));
+  });
+
+  it("prevents a nonexistent account under review from entering escrow", async () => {
+    const evaluated = evaluatePayments(
+      [payment("michael.tetnet", "0.002", "typo")],
+      { ...policy, requireExistingAccount: false },
+      { "michael.tetnet": false },
+    );
+    expect(evaluated.payments[0]).toMatchObject({ valid: true, exists: false });
+    const run = await runPaymentReadinessAgent(evaluated.payments, false);
+    expect(run.paymentDecisions[0]).toMatchObject({ paymentId: "typo", disposition: "review" });
+    const enforced = enforceReadinessDecisions(evaluated.payments, run.paymentDecisions);
+    expect(enforced[0].valid).toBe(false);
+    expect(enforced[0].issues).toEqual(expect.arrayContaining([
+      "Account was not found on testnet",
+      expect.stringMatching(/Treasury Agent review required/),
     ]));
   });
 });

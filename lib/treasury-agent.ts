@@ -320,3 +320,18 @@ export async function runPaymentReadinessAgent(payments: CsvPayment[], useOpenAI
     generatedAt: new Date().toISOString(),
   };
 }
+
+export function enforceReadinessDecisions(payments: CsvPayment[], decisions: AgentPaymentDecision[]): CsvPayment[] {
+  const decisionsByPayment = new Map(decisions.map((decision) => [decision.paymentId, decision]));
+  return payments.map((payment) => {
+    const decision = decisionsByPayment.get(payment.id);
+    if (!decision) {
+      return payment.valid
+        ? { ...payment, valid: false, issues: [...payment.issues, "Treasury Agent hold: no final readiness decision was recorded"] }
+        : payment;
+    }
+    if (!payment.valid || decision.disposition === "ready") return payment;
+    const label = decision.disposition === "review" ? "review required" : "hold";
+    return { ...payment, valid: false, issues: [...payment.issues, `Treasury Agent ${label}: ${decision.reason}`] };
+  });
+}

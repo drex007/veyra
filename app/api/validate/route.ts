@@ -3,7 +3,7 @@ import { z } from "zod";
 import { evaluatePayments, isValidNearAccountId } from "@/lib/agent";
 import { accountExists } from "@/lib/near-rpc";
 import { analyzePaymentBatch } from "@/lib/openai-agent";
-import { runPaymentReadinessAgent } from "@/lib/treasury-agent";
+import { enforceReadinessDecisions, runPaymentReadinessAgent } from "@/lib/treasury-agent";
 import { paymentTotals } from "@/lib/amounts";
 
 const paymentSchema = z.object({
@@ -50,16 +50,7 @@ export async function POST(request: Request) {
       analyzePaymentBatch(validation.payments, body.policy.useOpenAI),
       runPaymentReadinessAgent(validation.payments, body.policy.useOpenAI),
     ]);
-    const held = new Map(
-      treasuryAgent.paymentDecisions
-        .filter((decision) => decision.disposition === "held")
-        .map((decision) => [decision.paymentId, decision.reason]),
-    );
-    const payments = validation.payments.map((payment) => {
-      const reason = held.get(payment.id);
-      if (!payment.valid || !reason) return payment;
-      return { ...payment, valid: false, issues: [...payment.issues, `Treasury Agent hold: ${reason}`] };
-    });
+    const payments = enforceReadinessDecisions(validation.payments, treasuryAgent.paymentDecisions);
     const acceptedPayments = payments.filter((payment) => payment.valid);
     const totalsAccepted = paymentTotals(acceptedPayments);
     return NextResponse.json({

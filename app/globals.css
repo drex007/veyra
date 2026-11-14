@@ -345,7 +345,10 @@ td { padding: 14px 13px; border-top: 1px solid var(--line); font-size: 10px; }
 td strong { font-weight: 600; }
 .status { padding: 5px 7px; border-radius: 99px; display: inline-flex; align-items: center; gap: 5px; font-size: 8px; font-weight: 650; }
 .status.approved { color: #326046; background: #e3f0e7; }
+.status.review { color: #805716; background: var(--amber-soft); }
 .status.rejected { color: #87332d; background: #f8e5e3; }
+.decision-cell { max-width: 240px; display: grid; justify-items: start; gap: 5px; }
+.decision-cell small { color: var(--muted); font-size: 8px; line-height: 1.4; }
 .token-label { padding: 3px 5px; border-radius: 4px; color: var(--muted-strong); background: var(--soft); font-size: 8px; font-weight: 600; }
 .action-row { padding-top: 22px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .action-row > div { display: flex; align-items: center; gap: 13px; }
