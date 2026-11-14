@@ -9,7 +9,7 @@ import { actionCreators } from "@near-js/transactions";
 
 type SupportedWalletId = "meteor-wallet" | "my-near-wallet";
 
-interface CallMethodInput {
+export interface CallMethodInput {
   receiverId?: string;
   methodName: string;
   args: object;
@@ -27,6 +27,7 @@ interface WalletContextValue {
   connect: () => void;
   disconnect: () => Promise<void>;
   callMethod: (input: CallMethodInput) => Promise<string | undefined>;
+  callMethods: (inputs: CallMethodInput[]) => Promise<Array<string | undefined>>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -122,6 +123,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [accountId, getWallet],
   );
 
+  const callMethods = useCallback(
+    async (inputs: CallMethodInput[]) => {
+      if (!inputs.length) return [];
+      if (!accountId) throw new Error("Connect a NEAR wallet first.");
+      const wallet = await getWallet();
+      const transactions = inputs.map(({ receiverId = CONTRACT_ID, methodName, args, deposit = "0", gas = "100000000000000" }) => {
+        if (!receiverId) throw new Error("A transaction receiver is required.");
+        return {
+          signerId: accountId,
+          receiverId,
+          actions: [actionCreators.functionCall(methodName, args, BigInt(gas), BigInt(deposit))],
+        };
+      });
+      const outcomes = await wallet.signAndSendTransactions({ transactions });
+      return Array.isArray(outcomes) ? outcomes.map(transactionHash) : inputs.map(() => undefined);
+    },
+    [accountId, getWallet],
+  );
+
   const value = useMemo<WalletContextValue>(
     () => ({
       accountId,
@@ -133,8 +153,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       connect,
       disconnect,
       callMethod,
+      callMethods,
     }),
-    [accountId, selector, connecting, connect, disconnect, callMethod],
+    [accountId, selector, connecting, connect, disconnect, callMethod, callMethods],
   );
 
   return (

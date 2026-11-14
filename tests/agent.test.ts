@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluatePayments, isValidNearAccountId } from "@/lib/agent";
 import { buildDeterministicFindings } from "@/lib/openai-agent";
+import { runPaymentReadinessAgent } from "@/lib/treasury-agent";
 import type { CsvPayment } from "@/lib/types";
 
 function payment(recipient: string, amount: string, id = recipient): CsvPayment {
@@ -87,5 +88,24 @@ describe("agent payment policy", () => {
       severity: "critical",
       affectedPaymentIds: ["1", "2"],
     });
+  });
+
+  it("runs an auditable readiness loop and keeps policy failures held", async () => {
+    const evaluated = evaluatePayments(
+      [payment("alice.testnet", "1", "1"), payment("invalid wallet", "1", "2")],
+      { ...policy, requireExistingAccount: false },
+      { "alice.testnet": true, "invalid wallet": false },
+    );
+    const run = await runPaymentReadinessAgent(evaluated.payments, false);
+    expect(run.source).toBe("policy-engine");
+    expect(run.paymentDecisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ paymentId: "1", disposition: "ready" }),
+      expect.objectContaining({ paymentId: "2", disposition: "held" }),
+    ]));
+    expect(run.activity.map((item) => item.tool)).toEqual(expect.arrayContaining([
+      "get_batch_details",
+      "validate_recipients",
+      "finalize_readiness",
+    ]));
   });
 });

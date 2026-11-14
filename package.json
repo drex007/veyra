@@ -28,6 +28,7 @@
     "@near-wallet-selector/modal-ui": "latest",
     "@near-wallet-selector/my-near-wallet": "latest",
     "lucide-react": "latest",
+    "near-api-js": "^6.5.1",
     "next": "latest",
     "openai": "^7.56.0",
     "papaparse": "latest",

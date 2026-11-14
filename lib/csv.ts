@@ -25,8 +25,8 @@ function rowsToPayments(rows: CsvRow[]): CsvPayment[] {
   if (rows.length === 0) {
     throw new Error("The payment file does not contain any payment rows.");
   }
-  if (rows.length > 200) {
-    throw new Error("The MVP supports a maximum of 200 recipients per batch.");
+  if (rows.length > 1_000) {
+    throw new Error("Veyra supports a maximum of 1,000 recipients per payment run.");
   }
   return rows.map((row, index) => ({
     id: `payment-${index + 1}`,

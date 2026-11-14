@@ -18,13 +18,37 @@ const paymentSchema = z.object({
   contractItemIndex: z.number().int().nonnegative().optional(),
 });
 
+const agentRunSchema = z.object({
+  id: z.string(),
+  objective: z.enum(["payment-readiness", "failure-recovery"]),
+  source: z.enum(["openai", "policy-engine"]),
+  model: z.string(),
+  decision: z.enum(["ready", "review", "blocked"]),
+  summary: z.string(),
+  activity: z.array(z.object({
+    id: z.string(),
+    phase: z.enum(["observe", "reason", "act", "verify"]),
+    tool: z.string(),
+    status: z.enum(["completed", "blocked", "skipped"]),
+    message: z.string(),
+    detail: z.string().optional(),
+    createdAt: z.string(),
+  })),
+  paymentDecisions: z.array(z.object({
+    paymentId: z.string(),
+    disposition: z.enum(["ready", "review", "held"]),
+    reason: z.string(),
+  })),
+  generatedAt: z.string(),
+});
+
 const batchSchema = z.object({
   id: z.string(),
   name: z.string(),
   owner: z.string(),
   createdAt: z.string(),
   status: z.enum(["draft", "ready", "processing", "complete", "cancelled"]),
-  payments: z.array(paymentSchema).max(200),
+  payments: z.array(paymentSchema).max(1_000),
   total: z.number().nonnegative(),
   totals: z.array(z.object({ token: z.enum(["NEAR", "USDC", "USDT"]), amount: z.number().nonnegative() })).optional(),
   assets: z.array(z.object({
@@ -36,6 +60,7 @@ const batchSchema = z.object({
   txHash: z.string().optional(),
   contractBatchId: z.number().int().nonnegative().optional(),
   mode: z.enum(["demo", "contract"]),
+  agentRuns: z.array(agentRunSchema).optional(),
 });
 
 export async function GET(request: Request) {

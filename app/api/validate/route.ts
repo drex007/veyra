@@ -3,6 +3,8 @@ import { z } from "zod";
 import { evaluatePayments, isValidNearAccountId } from "@/lib/agent";
 import { accountExists } from "@/lib/near-rpc";
 import { analyzePaymentBatch } from "@/lib/openai-agent";
+import { runPaymentReadinessAgent } from "@/lib/treasury-agent";
+import { paymentTotals } from "@/lib/amounts";
 
 const paymentSchema = z.object({
   id: z.string(),
@@ -19,7 +21,7 @@ const paymentSchema = z.object({
 });
 
 const requestSchema = z.object({
-  payments: z.array(paymentSchema).min(1).max(200),
+  payments: z.array(paymentSchema).min(1).max(1_000),
   policy: z.object({
     maxPerRecipient: z.number().positive().max(1_000_000),
     requireExistingAccount: z.boolean(),
@@ -32,16 +34,45 @@ export async function POST(request: Request) {
   try {
     const body = requestSchema.parse(await request.json());
     const uniqueAccounts = [...new Set(body.payments.map((item) => item.recipient))];
-    const checks = await Promise.all(
-      uniqueAccounts.map(async (accountId) => [
-        accountId,
-        isValidNearAccountId(accountId) ? await accountExists(accountId) : false,
-      ] as const),
-    );
+    let cursor = 0;
+    const checks: Array<readonly [string, boolean | null]> = new Array(uniqueAccounts.length);
+    await Promise.all(Array.from({ length: Math.min(20, uniqueAccounts.length) }, async () => {
+      while (cursor < uniqueAccounts.length) {
+        const index = cursor;
+        cursor += 1;
+        const accountId = uniqueAccounts[index];
+        checks[index] = [accountId, isValidNearAccountId(accountId) ? await accountExists(accountId) : false] as const;
+      }
+    }));
     const accountExistence = Object.fromEntries(checks);
     const validation = evaluatePayments(body.payments, body.policy, accountExistence);
-    const aiAnalysis = await analyzePaymentBatch(validation.payments, body.policy.useOpenAI);
-    return NextResponse.json({ ...validation, aiAnalysis });
+    const [aiAnalysis, treasuryAgent] = await Promise.all([
+      analyzePaymentBatch(validation.payments, body.policy.useOpenAI),
+      runPaymentReadinessAgent(validation.payments, body.policy.useOpenAI),
+    ]);
+    const held = new Map(
+      treasuryAgent.paymentDecisions
+        .filter((decision) => decision.disposition === "held")
+        .map((decision) => [decision.paymentId, decision.reason]),
+    );
+    const payments = validation.payments.map((payment) => {
+      const reason = held.get(payment.id);
+      if (!payment.valid || !reason) return payment;
+      return { ...payment, valid: false, issues: [...payment.issues, `Treasury Agent hold: ${reason}`] };
+    });
+    const acceptedPayments = payments.filter((payment) => payment.valid);
+    const totalsAccepted = paymentTotals(acceptedPayments);
+    return NextResponse.json({
+      ...validation,
+      payments,
+      accepted: acceptedPayments.length,
+      rejected: payments.length - acceptedPayments.length,
+      warnings: payments.filter((payment) => payment.valid && payment.issues.length > 0).length,
+      totalAccepted: totalsAccepted.find(({ token }) => token === "NEAR")?.amount ?? 0,
+      totalsAccepted,
+      aiAnalysis,
+      treasuryAgent,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Validation failed";
     return NextResponse.json({ error: message }, { status: 400 });

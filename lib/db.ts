@@ -1,5 +1,5 @@
 import postgres, { type Sql } from "postgres";
-import type { CsvPayment, TokenTotal, VeyraAssetBatch, VeyraBatch } from "@/lib/types";
+import type { CsvPayment, TokenTotal, TreasuryAgentRun, VeyraAssetBatch, VeyraBatch } from "@/lib/types";
 
 declare global {
   var veyraSql: Sql | undefined;
@@ -13,10 +13,12 @@ export function isDatabaseConfigured(): boolean {
 function getSql(): Sql {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is not configured");
   if (!globalThis.veyraSql) {
+    const databaseUrl = new URL(process.env.DATABASE_URL);
     globalThis.veyraSql = postgres(process.env.DATABASE_URL, {
       max: 5,
       idle_timeout: 20,
       connect_timeout: 10,
+      prepare: databaseUrl.port !== "6543",
       ssl: process.env.DATABASE_SSL === "disable" ? false : "require",
     });
   }
@@ -37,6 +39,7 @@ async function ensureSchema(): Promise<void> {
           total_near NUMERIC(40, 24) NOT NULL,
           totals JSONB NOT NULL DEFAULT '[]'::jsonb,
           assets JSONB NOT NULL DEFAULT '[]'::jsonb,
+          agent_runs JSONB NOT NULL DEFAULT '[]'::jsonb,
           chain_batch_id BIGINT,
           tx_hash TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -64,6 +67,7 @@ async function ensureSchema(): Promise<void> {
       `;
       await sql`ALTER TABLE veyra_batches ADD COLUMN IF NOT EXISTS totals JSONB NOT NULL DEFAULT '[]'::jsonb`;
       await sql`ALTER TABLE veyra_batches ADD COLUMN IF NOT EXISTS assets JSONB NOT NULL DEFAULT '[]'::jsonb`;
+      await sql`ALTER TABLE veyra_batches ADD COLUMN IF NOT EXISTS agent_runs JSONB NOT NULL DEFAULT '[]'::jsonb`;
       await sql`ALTER TABLE veyra_payments ADD COLUMN IF NOT EXISTS token TEXT NOT NULL DEFAULT 'NEAR'`;
       await sql`ALTER TABLE veyra_payments ADD COLUMN IF NOT EXISTS contract_batch_id BIGINT`;
       await sql`ALTER TABLE veyra_payments ADD COLUMN IF NOT EXISTS contract_item_index INTEGER`;
@@ -85,10 +89,10 @@ export async function saveBatchToDatabase(batch: VeyraBatch): Promise<void> {
   await sql.begin(async (transaction) => {
     await transaction`
       INSERT INTO veyra_batches (
-        id, name, owner, status, mode, total_near, totals, assets, chain_batch_id, tx_hash, created_at, updated_at
+        id, name, owner, status, mode, total_near, totals, assets, agent_runs, chain_batch_id, tx_hash, created_at, updated_at
       ) VALUES (
         ${batch.id}, ${batch.name}, ${batch.owner}, ${batch.status}, ${batch.mode}, ${batch.total},
-        ${transaction.json(batch.totals ?? [])}, ${transaction.json(batch.assets ?? [])},
+        ${transaction.json(batch.totals ?? [])}, ${transaction.json(batch.assets ?? [])}, ${transaction.json(batch.agentRuns ?? [])},
         ${batch.contractBatchId ?? null}, ${batch.txHash ?? null}, ${new Date(batch.createdAt)}, NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
@@ -99,6 +103,7 @@ export async function saveBatchToDatabase(batch: VeyraBatch): Promise<void> {
         total_near = EXCLUDED.total_near,
         totals = EXCLUDED.totals,
         assets = EXCLUDED.assets,
+        agent_runs = EXCLUDED.agent_runs,
         chain_batch_id = EXCLUDED.chain_batch_id,
         tx_hash = EXCLUDED.tx_hash,
         updated_at = NOW()
@@ -141,6 +146,7 @@ interface BatchRow {
   total_near: string;
   totals: TokenTotal[];
   assets: VeyraAssetBatch[];
+  agent_runs: TreasuryAgentRun[];
   chain_batch_id: string | null;
   tx_hash: string | null;
   created_at: Date;
@@ -166,7 +172,7 @@ export async function getBatchesFromDatabase(owner: string): Promise<VeyraBatch[
   await ensureSchema();
   const sql = getSql();
   const batchRows = await sql<BatchRow[]>`
-    SELECT id, name, owner, status, mode, total_near, totals, assets, chain_batch_id, tx_hash, created_at
+    SELECT id, name, owner, status, mode, total_near, totals, assets, agent_runs, chain_batch_id, tx_hash, created_at
     FROM veyra_batches
     WHERE owner = ${owner}
     ORDER BY created_at DESC
@@ -190,6 +196,7 @@ export async function getBatchesFromDatabase(owner: string): Promise<VeyraBatch[
       total: Number(batch.total_near),
       totals: batch.totals,
       assets: batch.assets,
+      agentRuns: batch.agent_runs,
       contractBatchId: batch.chain_batch_id === null ? undefined : Number(batch.chain_batch_id),
       txHash: batch.tx_hash ?? undefined,
       payments: paymentRows.map((payment) => ({

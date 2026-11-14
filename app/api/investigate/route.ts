@@ -26,7 +26,7 @@ const requestSchema = z.object({
     owner: z.string(),
     createdAt: z.string(),
     status: z.enum(["draft", "ready", "processing", "complete", "cancelled"]),
-    payments: z.array(paymentSchema).min(1).max(200),
+    payments: z.array(paymentSchema).min(1).max(1_000),
     total: z.number().nonnegative(),
     totals: z.array(z.object({ token: z.enum(["NEAR", "USDC", "USDT"]), amount: z.number().nonnegative() })).optional(),
     assets: z.array(z.object({

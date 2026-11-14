@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS veyra_batches (
   total_near NUMERIC(40, 24) NOT NULL,
   totals JSONB NOT NULL DEFAULT '[]'::jsonb,
   assets JSONB NOT NULL DEFAULT '[]'::jsonb,
+  agent_runs JSONB NOT NULL DEFAULT '[]'::jsonb,
   chain_batch_id BIGINT,
   tx_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

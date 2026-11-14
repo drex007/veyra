@@ -50,6 +50,45 @@ export interface AgentAnalysis {
   findings: IntelligenceFinding[];
 }
 
+export type AgentActivityPhase = "observe" | "reason" | "act" | "verify";
+export type AgentActivityStatus = "completed" | "blocked" | "skipped";
+
+export interface AgentActivity {
+  id: string;
+  phase: AgentActivityPhase;
+  tool: string;
+  status: AgentActivityStatus;
+  message: string;
+  detail?: string;
+  createdAt: string;
+}
+
+export interface AgentPaymentDecision {
+  paymentId: string;
+  disposition: "ready" | "review" | "held";
+  reason: string;
+}
+
+export interface TreasuryAgentRun {
+  id: string;
+  objective: "payment-readiness" | "failure-recovery";
+  source: "openai" | "policy-engine";
+  model: string;
+  decision: "ready" | "review" | "blocked";
+  summary: string;
+  activity: AgentActivity[];
+  paymentDecisions: AgentPaymentDecision[];
+  generatedAt: string;
+}
+
+export interface RecoveryAction {
+  type: "pause" | "prepare-retry";
+  paymentId: string;
+  status: "completed" | "prepared" | "blocked";
+  reason: string;
+  requiresApproval: boolean;
+}
+
 export type IntelligenceSeverity = "info" | "warning" | "critical";
 
 export interface IntelligenceFinding {
@@ -82,6 +121,8 @@ export interface PaymentInvestigation {
   findings: IntelligenceFinding[];
   nextActions: string[];
   evidence: InvestigationEvidence[];
+  activity: AgentActivity[];
+  recoveryActions: RecoveryAction[];
   generatedAt: string;
 }
 
@@ -98,6 +139,7 @@ export interface VeyraBatch {
   txHash?: string;
   contractBatchId?: number;
   mode: "demo" | "contract";
+  agentRuns?: TreasuryAgentRun[];
 }
 
 export interface VeyraAssetBatch {
@@ -116,4 +158,5 @@ export interface ValidationSummary {
   totalsAccepted: TokenTotal[];
   checkedAt: string;
   aiAnalysis?: AgentAnalysis;
+  treasuryAgent?: TreasuryAgentRun;
 }

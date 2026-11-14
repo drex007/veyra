@@ -33,4 +33,14 @@ describe("payment file ingestion", () => {
       { recipient: "carol.testnet", amount: "0.75" },
     ]);
   });
+
+  it("accepts a 300-recipient run so it can be split into contract-sized batches", () => {
+    const csv = ["wallet,amount", ...Array.from({ length: 300 }, (_, index) => `recipient-${index}.testnet,1`)].join("\n");
+    expect(parsePaymentCsv(csv)).toHaveLength(300);
+  });
+
+  it("rejects runs above the application safety limit", () => {
+    const csv = ["wallet,amount", ...Array.from({ length: 1_001 }, (_, index) => `recipient-${index}.testnet,1`)].join("\n");
+    expect(() => parsePaymentCsv(csv)).toThrow("maximum of 1,000");
+  });
 });

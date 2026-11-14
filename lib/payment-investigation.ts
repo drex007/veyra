@@ -1,13 +1,15 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { paymentTotals, TOKEN_DECIMALS } from "@/lib/amounts";
+import { TOKEN_DECIMALS } from "@/lib/amounts";
 import { nearRpc, viewContract } from "@/lib/near-rpc";
 import type {
+  AgentActivity,
   IntelligenceFinding,
   InvestigationEvidence,
   PaymentInvestigation,
   PaymentToken,
+  RecoveryAction,
   TokenTotal,
   VeyraBatch,
 } from "@/lib/types";
@@ -100,12 +102,14 @@ function buildFailureFindings(batch: VeyraBatch): IntelligenceFinding[] {
   return findings;
 }
 
-async function collectTransactionEvidence(batch: VeyraBatch): Promise<InvestigationEvidence[]> {
+async function collectTransactionEvidence(batch: VeyraBatch): Promise<{ evidence: InvestigationEvidence[]; failedHashes: Set<string> }> {
   const hashes = [...new Set(batch.payments.flatMap((payment) => payment.txHash ? [payment.txHash] : []))];
+  const failedHashes = new Set<string>();
   const evidence = await Promise.all(hashes.map(async (hash): Promise<InvestigationEvidence> => {
     try {
       const transaction = await nearRpc<TransactionResult>("tx", [hash, batch.owner]);
       const failures = transaction.receipts_outcome?.filter((receipt) => JSON.stringify(receipt.outcome?.status).includes("Failure")) ?? [];
+      if (failures.length) failedHashes.add(hash);
       return {
         source: "transaction-receipt",
         reference: hash,
@@ -123,16 +127,16 @@ async function collectTransactionEvidence(batch: VeyraBatch): Promise<Investigat
       };
     }
   }));
-  return evidence;
+  return { evidence, failedHashes };
 }
 
-async function collectEscrowEvidence(batch: VeyraBatch): Promise<{ evidence: InvestigationEvidence[]; recoverable: TokenTotal[] }> {
+async function collectEscrowEvidence(batch: VeyraBatch): Promise<{ evidence: InvestigationEvidence[]; recoverable: TokenTotal[]; failedPaymentIds: Set<string> }> {
   const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID;
   const ids = [...new Set([
     ...(batch.assets?.flatMap((asset) => asset.contractBatchId === undefined ? [] : [asset.contractBatchId]) ?? []),
     ...(batch.contractBatchId === undefined ? [] : [batch.contractBatchId]),
   ])];
-  if (!contractId || batch.mode !== "contract" || !ids.length) return { evidence: [], recoverable: [] };
+  if (!contractId || batch.mode !== "contract" || !ids.length) return { evidence: [], recoverable: [], failedPaymentIds: new Set() };
 
   const results = await Promise.all(ids.map(async (batchId) => {
     try {
@@ -147,6 +151,9 @@ async function collectEscrowEvidence(batch: VeyraBatch): Promise<{ evidence: Inv
           detail: `On-chain status ${snapshot.status}; ${amount} ${snapshot.token_symbol} remains in escrow and ${atomicToAmount(snapshot.paid_amount, snapshot.token_symbol)} ${snapshot.token_symbol} is recorded as paid.`,
         },
         recoverable: amount > 0 ? { token: snapshot.token_symbol, amount } : null,
+        failedPaymentIds: batch.payments
+          .filter((payment) => payment.contractBatchId === batchId && payment.contractItemIndex !== undefined && snapshot.items[payment.contractItemIndex]?.status === "Failed")
+          .map((payment) => payment.id),
       };
     } catch (error) {
       return {
@@ -157,13 +164,104 @@ async function collectEscrowEvidence(batch: VeyraBatch): Promise<{ evidence: Inv
           detail: `The escrow snapshot could not be verified: ${error instanceof Error ? error.message : "unknown contract read error"}`,
         },
         recoverable: null,
+        failedPaymentIds: [],
       };
     }
   }));
   return {
     evidence: results.map((result) => result.evidence),
     recoverable: uniqueTotals(results.flatMap((result) => result.recoverable ? [result.recoverable] : [])),
+    failedPaymentIds: new Set(results.flatMap((result) => result.failedPaymentIds)),
   };
+}
+
+function buildRecoveryRun(
+  batch: VeyraBatch,
+  transaction: Awaited<ReturnType<typeof collectTransactionEvidence>>,
+  escrow: Awaited<ReturnType<typeof collectEscrowEvidence>>,
+): { activity: AgentActivity[]; actions: RecoveryAction[] } {
+  const now = () => new Date().toISOString();
+  const activity: AgentActivity[] = [{
+    id: "recovery-observe",
+    phase: "observe",
+    tool: "get_batch_details",
+    status: "completed",
+    message: `Loaded ${batch.payments.length} payment records without changing recipients or amounts.`,
+    createdAt: now(),
+  }];
+  activity.push({
+    id: "recovery-transactions",
+    phase: "act",
+    tool: "get_transaction_status",
+    status: transaction.evidence.length ? "completed" : "skipped",
+    message: transaction.evidence.length
+      ? `Checked ${transaction.evidence.length} unique transaction receipt${transaction.evidence.length === 1 ? "" : "s"}.`
+      : "No transaction hash was available to check.",
+    detail: transaction.failedHashes.size ? `${transaction.failedHashes.size} transaction${transaction.failedHashes.size === 1 ? " has" : "s have"} a failed receipt.` : undefined,
+    createdAt: now(),
+  });
+  activity.push({
+    id: "recovery-escrow",
+    phase: "act",
+    tool: "get_escrow_balance",
+    status: escrow.evidence.length ? "completed" : "skipped",
+    message: escrow.evidence.length
+      ? `Checked ${escrow.evidence.length} on-chain escrow snapshot${escrow.evidence.length === 1 ? "" : "s"}.`
+      : "No configured on-chain escrow batch was available.",
+    detail: escrow.recoverable.length ? `Verified remaining escrow: ${escrow.recoverable.map(({ amount, token }) => `${amount} ${token}`).join(", ")}.` : "No remaining escrow balance was verified.",
+    createdAt: now(),
+  });
+
+  const actions: RecoveryAction[] = [];
+  const unresolved = batch.payments.filter((payment) => payment.status === "pending" || payment.status === "processing");
+  unresolved.forEach((payment) => actions.push({
+    type: "pause",
+    paymentId: payment.id,
+    status: "completed",
+    reason: "Outcome is unresolved; execution must remain paused until final chain state is known.",
+    requiresApproval: false,
+  }));
+  const failed = batch.payments.filter((payment) => payment.status === "failed" && payment.valid);
+  failed.forEach((payment) => {
+    const conclusive = (payment.txHash ? transaction.failedHashes.has(payment.txHash) : false) || escrow.failedPaymentIds.has(payment.id);
+    actions.push({
+      type: "prepare-retry",
+      paymentId: payment.id,
+      status: conclusive ? "prepared" : "blocked",
+      reason: conclusive
+        ? "Failure is supported by chain evidence. A retry requires a new owner-approved, exactly funded batch."
+        : "Retry blocked because the previous transfer is not conclusively failed in available chain evidence.",
+      requiresApproval: true,
+    });
+  });
+  activity.push({
+    id: "recovery-classify",
+    phase: "reason",
+    tool: "classify_payment_failure",
+    status: "completed",
+    message: `Classified ${failed.length} execution failure${failed.length === 1 ? "" : "s"} and ${unresolved.length} unresolved outcome${unresolved.length === 1 ? "" : "s"}.`,
+    createdAt: now(),
+  });
+  activity.push({
+    id: "recovery-prepare",
+    phase: "act",
+    tool: "prepare_retry",
+    status: actions.some((action) => action.type === "prepare-retry" && action.status === "prepared") ? "completed" : failed.length ? "blocked" : "skipped",
+    message: failed.length
+      ? `${actions.filter((action) => action.type === "prepare-retry" && action.status === "prepared").length} retry plan${actions.filter((action) => action.type === "prepare-retry" && action.status === "prepared").length === 1 ? "" : "s"} prepared; execution authority was not granted.`
+      : "No failed on-chain payment required a retry plan.",
+    detail: "All retry plans require explicit owner approval and fresh contract funding.",
+    createdAt: now(),
+  });
+  activity.push({
+    id: "recovery-verify",
+    phase: "verify",
+    tool: "generate_reconciliation_report",
+    status: "completed",
+    message: "Reconciled the recovery plan against payment records and available chain evidence.",
+    createdAt: now(),
+  });
+  return { activity, actions };
 }
 
 function fallbackInvestigation(
@@ -172,6 +270,8 @@ function fallbackInvestigation(
   findings: IntelligenceFinding[],
   evidence: InvestigationEvidence[],
   recoverableTotals: TokenTotal[],
+  activity: AgentActivity[],
+  recoveryActions: RecoveryAction[],
   reason?: string,
 ): PaymentInvestigation {
   const failed = batch.payments.filter((payment) => payment.status === "failed");
@@ -197,6 +297,8 @@ function fallbackInvestigation(
     findings,
     nextActions,
     evidence,
+    activity,
+    recoveryActions,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -209,17 +311,16 @@ export async function investigatePaymentBatch(batch: VeyraBatch, question: strin
     verified: false,
     detail: `Operator session record: ${batch.payments.filter((payment) => payment.status === "success").length} success, ${batch.payments.filter((payment) => payment.status === "failed").length} failed, ${batch.payments.filter((payment) => payment.status === "pending" || payment.status === "processing").length} unresolved.`,
   };
-  const [transactionEvidence, escrow] = await Promise.all([
+  const [transaction, escrow] = await Promise.all([
     collectTransactionEvidence(batch),
     collectEscrowEvidence(batch),
   ]);
-  const evidence = [recordEvidence, ...escrow.evidence, ...transactionEvidence];
-  const recoverableTotals = escrow.recoverable.length
-    ? escrow.recoverable
-    : paymentTotals(batch.payments.filter((payment) => payment.status === "failed" && payment.valid));
+  const evidence = [recordEvidence, ...escrow.evidence, ...transaction.evidence];
+  const recoverableTotals = escrow.recoverable;
+  const recovery = buildRecoveryRun(batch, transaction, escrow);
 
   if (!process.env.OPENAI_API_KEY) {
-    return fallbackInvestigation(batch, question, findings, evidence, recoverableTotals, "OpenAI is not configured; the investigation uses deterministic records and read-only chain evidence.");
+    return fallbackInvestigation(batch, question, findings, evidence, recoverableTotals, recovery.activity, recovery.actions, "OpenAI is not configured; the investigation uses deterministic records and read-only chain evidence.");
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-6-astra";
@@ -251,7 +352,7 @@ export async function investigatePaymentBatch(batch: VeyraBatch, question: strin
       text: { format: zodTextFormat(investigationSchema, "veyra_payment_investigation") },
     });
     const parsed = response.output_parsed;
-    if (!parsed) return fallbackInvestigation(batch, question, findings, evidence, recoverableTotals, "The OpenAI model returned no structured investigation.");
+    if (!parsed) return fallbackInvestigation(batch, question, findings, evidence, recoverableTotals, recovery.activity, recovery.actions, "The OpenAI model returned no structured investigation.");
     const validIds = new Set(batch.payments.map((payment) => payment.id));
     const groundedFindings = parsed.findings
       .map((finding) => ({ ...finding, affectedPaymentIds: finding.affectedPaymentIds.filter((id) => validIds.has(id)) }))
@@ -268,10 +369,12 @@ export async function investigatePaymentBatch(batch: VeyraBatch, question: strin
       findings: groundedFindings.length ? groundedFindings : findings,
       nextActions: parsed.nextActions,
       evidence,
+      activity: recovery.activity,
+      recoveryActions: recovery.actions,
       generatedAt: new Date().toISOString(),
     };
   } catch (error) {
     console.error("Veyra payment investigation failed:", error instanceof Error ? error.message : error);
-    return fallbackInvestigation(batch, question, findings, evidence, recoverableTotals, "OpenAI was unavailable; the investigation uses deterministic records and read-only chain evidence.");
+    return fallbackInvestigation(batch, question, findings, evidence, recoverableTotals, recovery.activity, recovery.actions, "OpenAI was unavailable; the investigation uses deterministic records and read-only chain evidence.");
   }
 }

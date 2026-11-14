@@ -54,7 +54,7 @@ start_database() {
     "$VEYRA_PG_BIN/pg_ctl" \
       --pgdata="$VEYRA_PG_DATA" \
       --log="$VEYRA_PG_LOG" \
-      --options="-h 127.0.0.1 -p $VEYRA_PG_PORT" \
+      --options="-h 127.0.0.1 -p $VEYRA_PG_PORT -k $VEYRA_PG_ROOT" \
       --wait start
   fi
 }
